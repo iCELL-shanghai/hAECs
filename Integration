@@ -1,0 +1,59 @@
+library(Seurat)
+library(harmony)
+library(tidyverse)
+library(patchwork)
+
+dir <- c(dir1, die2,...)
+
+sample_name <- c(sample1, sample2,...)
+
+scRNAlist <- list()
+for(i in 1:length(dir)){
+  counts <- Read10X(data.dir = dir[i])
+  scRNAlist[[i]] <- CreateSeuratObject(counts, project = sample_name[i],
+                                       min.cell = 3, min.features = 200)
+  scRNAlist[[i]] <- RenameCells(scRNAlist[[i]], add.cell.id = sample_name[i])
+  if(T){
+    scRNAlist[[i]][['percent.mt']] <- PercentageFeatureSet(scRNAlist[[i]], pattern = '^MT-')
+  }
+  if(T){
+    scRNAlist[[i]][['percent.rb']] <- PercentageFeatureSet(scRNAlist[[i]], pattern = '^RP[SL]')
+  }
+  if(T){
+    HB.genes <- c('HBA1','HBA2','HBB','HBD','HBE1','HBG1','HBG2','HBM','HBQ1','HBZ')
+    HB.genes <- CaseMatch(HB.genes, rownames(scRNAlist[[i]]))
+    scRNAlist[[i]][['percent.HB']] <- PercentageFeatureSet(scRNAlist[[i]], features = HB.genes)
+  }
+}
+
+names(scRNAlist) <- sample_name
+
+scRNA <- merge(scRNAlist[[1]], scRNAlist[2:length(scRNAlist)])
+table(scRNA$orig.ident)
+
+
+#theme.set2 = theme(axis.title.x=element_blank())
+plot.featrures = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rb", "percent.HB")
+VlnPlot(scRNA, features = plot.featrures, pt.size = F, group.by = 'orig.ident')
+
+
+#Set QC standards
+minGene=1500
+maxGene=8000
+maxUMI=60000
+pctMT=10
+pctHB=1
+
+scRNA <- subset(scRNA, subset = nCount_RNA < maxUMI & nFeature_RNA > minGene &
+                  nFeature_RNA < maxGene & percent.mt < pctMT & percent.HB < pctHB)
+VlnPlot(scRNA, features = plot.featrures, pt.size = F, group.by = 'orig.ident')
+
+scRNA <- NormalizeData(scRNA) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA(verbose=FALSE)
+system.time({scRNA <- RunHarmony(scRNA, group.by.vars = "orig.ident")})
+
+ElbowPlot(scRNA, ndims = 50)
+pc.num=1:30 #accorfing to ElbowPlot
+
+scRNA <- RunUMAP(scRNA, reduction = "harmony", dims = pc.num)
+scRNA <- FindNeighbors(scRNA, reduction = "harmony", dims = pc.num) %>% FindClusters()
+
